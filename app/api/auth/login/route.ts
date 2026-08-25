@@ -3,6 +3,14 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
 
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+  }
+  return new TextEncoder().encode(secret);
+}
+
 export async function POST(request: Request) {
   try {
     const { email, password } = await request.json();
@@ -33,9 +41,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET || "fallback_secret_key_change_me"
-    );
+    const secret = getJwtSecret();
     const token = await new SignJWT({
       userId: user.id,
       email: user.email,
@@ -48,7 +54,6 @@ export async function POST(request: Request) {
 
     const response = NextResponse.json({
       message: "Login successful",
-      token,
       user: {
         id: user.id,
         name: user.name,
