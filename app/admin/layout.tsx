@@ -4,6 +4,14 @@ import { redirect } from "next/navigation";
 import { jwtVerify } from "jose";
 import { AdminSidebar } from "@/components/AdminSidebar";
 
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+  }
+  return new TextEncoder().encode(secret);
+}
+
 export default async function AdminLayout({
   children,
 }: {
@@ -17,9 +25,7 @@ export default async function AdminLayout({
   }
 
   try {
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET || "fallback_secret_key_change_me"
-    );
+    const secret = getJwtSecret();
     const { payload } = await jwtVerify(token, secret);
     
     if (payload.role !== "ADMIN") {
