@@ -30,10 +30,6 @@ export default function LoginPage() {
         throw new Error(data.message || "Invalid credentials");
       }
 
-      if (data.token) {
-        document.cookie = `token=${data.token}; path=/; max-age=86400; SameSite=Lax`;
-      }
-
       if (data.user?.role === "ADMIN") {
         router.push("/admin/dashboard");
       } else {
