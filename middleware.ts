@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+  }
+  return new TextEncoder().encode(secret);
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -18,9 +26,7 @@ export async function middleware(request: NextRequest) {
     }
 
     try {
-      const secret = new TextEncoder().encode(
-        process.env.JWT_SECRET || "fallback_secret_key_change_me"
-      );
+      const secret = getJwtSecret();
       const { payload } = await jwtVerify(token, secret);
       const role = payload.role as string;
 
