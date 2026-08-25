@@ -3,6 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
 
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+  }
+  return new TextEncoder().encode(secret);
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -40,9 +48,7 @@ export async function DELETE(
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET || "fallback_secret_key_change_me"
-    );
+    const secret = getJwtSecret();
     const { payload } = await jwtVerify(token, secret);
 
     const userId = payload.userId as string;
@@ -74,3 +80,4 @@ export async function DELETE(
     );
   }
 }
+  
