@@ -5,19 +5,58 @@ import { SignJWT } from "jose";
 
 function getJwtSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
+
   if (!secret) {
-    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+    throw new Error(
+      "CRITICAL ERROR: JWT_SECRET environment variable is missing."
+    );
   }
+
   return new TextEncoder().encode(secret);
 }
 
 export async function POST(request: Request) {
   try {
-    const { name, email, password } = await request.json();
+    const body = await request.json();
+
+    const name =
+      typeof body.name === "string"
+        ? body.name.trim()
+        : "";
+
+    const email =
+      typeof body.email === "string"
+        ? body.email.trim().toLowerCase()
+        : "";
+
+    const password =
+      typeof body.password === "string"
+        ? body.password
+        : "";
 
     if (!name || !email || !password) {
       return NextResponse.json(
-        { message: "All fields are required" },
+        {
+          message: "All fields are required",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (name.length < 2) {
+      return NextResponse.json(
+        {
+          message: "Name must be at least 2 characters long",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (password.length < 6) {
+      return NextResponse.json(
+        {
+          message: "Password must be at least 6 characters long",
+        },
         { status: 400 }
       );
     }
@@ -28,12 +67,17 @@ export async function POST(request: Request) {
 
     if (existingUser) {
       return NextResponse.json(
-        { message: "Email already registered" },
+        {
+          message: "Email already registered",
+        },
         { status: 400 }
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(
+      password,
+      10
+    );
 
     const user = await prisma.user.create({
       data: {
@@ -45,25 +89,31 @@ export async function POST(request: Request) {
     });
 
     const secret = getJwtSecret();
+
     const token = await new SignJWT({
       userId: user.id,
       email: user.email,
       role: user.role,
     })
-      .setProtectedHeader({ alg: "HS256" })
+      .setProtectedHeader({
+        alg: "HS256",
+      })
       .setIssuedAt()
       .setExpirationTime("24h")
       .sign(secret);
 
-    const response = NextResponse.json({
-      message: "Registration successful",
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+    const response = NextResponse.json(
+      {
+        message: "Registration successful",
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
       },
-    }, { status: 201 });
+      { status: 201 }
+    );
 
     response.cookies.set({
       name: "token",
@@ -78,8 +128,12 @@ export async function POST(request: Request) {
     return response;
   } catch (error: any) {
     console.error("Registration error:", error);
+
     return NextResponse.json(
-      { message: error.message || "Internal server error" },
+      {
+        message:
+          error?.message || "Internal server error",
+      },
       { status: 500 }
     );
   }
