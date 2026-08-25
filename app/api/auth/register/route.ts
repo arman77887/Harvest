@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, signToken, setSessionCookie } from "@/lib/auth";
-import { registerSchema } from "@/lib/validations";
-import { Role } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { SignJWT } from "jose";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const validation = registerSchema.safeParse(body);
+    const { name, email, password } = await request.json();
 
-    if (!validation.success) {
+    if (!name || !email || !password) {
       return NextResponse.json(
-        { message: "Validation error", errors: validation.error.flatten().fieldErrors },
+        { message: "All fields are required" },
         { status: 400 }
       );
     }
-
-    const { name, email, password } = validation.data;
 
     const existingUser = await prisma.user.findUnique({
       where: { email },
@@ -24,45 +20,61 @@ export async function POST(request: Request) {
 
     if (existingUser) {
       return NextResponse.json(
-        { message: "User with this email already exists" },
-        { status: 409 }
+        { message: "Email already registered" },
+        { status: 400 }
       );
     }
 
-    const hashedPassword = await hashPassword(password);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newUser = await prisma.user.create({
+    const user = await prisma.user.create({
       data: {
         name,
         email,
         password: hashedPassword,
-        role: Role.CUSTOMER,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
+        role: "USER",
       },
     });
 
-    const token = await signToken({
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-      role: newUser.role,
-    });
-
-    await setSessionCookie(token);
-
-    return NextResponse.json(
-      { message: "Registration successful", user: newUser },
-      { status: 201 }
+    const secret = new TextEncoder().encode(
+      process.env.JWT_SECRET || "fallback_secret_key_change_me"
     );
-  } catch (error) {
-    console.error("Register Error:", error);
+    const token = await new SignJWT({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime("24h")
+      .sign(secret);
+
+    const response = NextResponse.json({
+      message: "Registration successful",
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    }, { status: 201 });
+
+    response.cookies.set({
+      name: "token",
+      value: token,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 86400,
+    });
+
+    return response;
+  } catch (error: any) {
+    console.error("Registration error:", error);
     return NextResponse.json(
-      { message: "Internal server error during registration" },
+      { message: error.message || "Internal server error" },
       { status: 500 }
     );
   }
