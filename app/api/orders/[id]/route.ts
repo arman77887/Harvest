@@ -5,6 +5,14 @@ import { jwtVerify } from "jose";
 
 const VALID_STATUSES = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
 
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+  }
+  return new TextEncoder().encode(secret);
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -17,9 +25,7 @@ export async function GET(
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET || "fallback_secret_key_change_me"
-    );
+    const secret = getJwtSecret();
     const { payload } = await jwtVerify(token, secret);
     const userId = payload.userId as string;
     const userRole = payload.role as string;
@@ -65,9 +71,7 @@ export async function PATCH(
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET || "fallback_secret_key_change_me"
-    );
+    const secret = getJwtSecret();
     const { payload } = await jwtVerify(token, secret);
     const userId = payload.userId as string;
 
