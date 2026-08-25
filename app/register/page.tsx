@@ -38,7 +38,7 @@ export default function RegisterPage() {
       router.push("/account");
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
-    } fontally {
+    } finally {
       setLoading(false);
     }
   };
