@@ -1,60 +1,53 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth";
-import { orderStatusSchema } from "@/lib/validations";
+import { cookies } from "next/headers";
+import { jwtVerify } from "jose";
+
+const VALID_STATUSES = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSession();
+    const cookieStore = await cookies();
+    const token = cookieStore.get("token")?.value;
 
-    if (!session) {
-      return NextResponse.json(
-        { message: "Unauthorized" },
-        { status: 401 }
-      );
+    if (!token) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
+    const secret = new TextEncoder().encode(
+      process.env.JWT_SECRET || "fallback_secret_key_change_me"
+    );
+    const { payload } = await jwtVerify(token, secret);
+    const userId = payload.userId as string;
+    const userRole = payload.role as string;
+
+    const { id } = await params;
     const order = await prisma.order.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
+        items: {
+          include: { product: true },
         },
-        orderItems: {
-          include: {
-            product: true,
-          },
-        },
+        user: true,
       },
     });
 
     if (!order) {
-      return NextResponse.json(
-        { message: "Order not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ message: "Order not found" }, { status: 404 });
     }
 
-    // Verify ownership or Admin role
-    if (session.role !== "ADMIN" && order.userId !== session.id) {
-      return NextResponse.json(
-        { message: "Forbidden: You do not have access to this order" },
-        { status: 403 }
-      );
+    if (userRole !== "ADMIN" && order.userId !== userId) {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 
-    return NextResponse.json(order, { status: 200 });
+    return NextResponse.json(order);
   } catch (error) {
-    console.error("GET Single Order Error:", error);
+    console.error("Failed to fetch order:", error);
     return NextResponse.json(
-      { message: "Failed to fetch order details" },
+      { message: "Failed to fetch order" },
       { status: 500 }
     );
   }
@@ -62,53 +55,64 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSession();
+    const cookieStore = await cookies();
+    const token = cookieStore.get("token")?.value;
 
-    if (!session || session.role !== "ADMIN") {
-      return NextResponse.json(
-        { message: "Unauthorized: Admin access required" },
-        { status: 403 }
-      );
+    if (!token) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const validation = orderStatusSchema.safeParse(body);
+    const secret = new TextEncoder().encode(
+      process.env.JWT_SECRET || "fallback_secret_key_change_me"
+    );
+    const { payload } = await jwtVerify(token, secret);
+    const userId = payload.userId as string;
 
-    if (!validation.success) {
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!dbUser || dbUser.role !== "ADMIN") {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
+
+    const { id } = await params;
+    const body = await request.json();
+    const { status } = body;
+
+    if (!status || !VALID_STATUSES.includes(status)) {
       return NextResponse.json(
-        { message: "Validation error", errors: validation.error.flatten().fieldErrors },
+        { message: "Invalid or missing status value" },
         { status: 400 }
       );
     }
 
-    const { status } = validation.data;
+    const existingOrder = await prisma.order.findUnique({
+      where: { id },
+    });
+
+    if (!existingOrder) {
+      return NextResponse.json({ message: "Order not found" }, { status: 404 });
+    }
 
     const updatedOrder = await prisma.order.update({
-      where: { id: params.id },
+      where: { id },
       data: { status },
       include: {
-        user: {
-          select: {
-            name: true,
-            email: true,
-          },
-        },
-        orderItems: {
-          include: {
-            product: true,
-          },
+        items: {
+          include: { product: true },
         },
       },
     });
 
-    return NextResponse.json(updatedOrder, { status: 200 });
-  } catch (error) {
-    console.error("PATCH Order Status Error:", error);
+    return NextResponse.json(updatedOrder);
+  } catch (error: any) {
+    console.error("Failed to update order status:", error);
     return NextResponse.json(
-      { message: "Failed to update order status" },
+      { message: error.message || "Failed to update order status" },
       { status: 500 }
     );
   }
