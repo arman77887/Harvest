@@ -31,10 +31,6 @@ export default function RegisterPage() {
         throw new Error(data.message || "Registration failed");
       }
 
-      if (data.token) {
-        document.cookie = `token=${data.token}; path=/; max-age=86400; SameSite=Lax`;
-      }
-
       router.push("/account");
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
