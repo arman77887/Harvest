@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth";
-import { categorySchema } from "@/lib/validations";
-import { slugify } from "@/lib/utils";
+import { cookies } from "next/headers";
+import { jwtVerify } from "jose";
 
 export async function GET() {
   try {
@@ -12,14 +11,11 @@ export async function GET() {
           select: { products: true },
         },
       },
-      orderBy: {
-        name: "asc",
-      },
+      orderBy: { name: "asc" },
     });
-
-    return NextResponse.json(categories, { status: 200 });
+    return NextResponse.json(categories);
   } catch (error) {
-    console.error("GET Categories Error:", error);
+    console.error("Failed to fetch categories:", error);
     return NextResponse.json(
       { message: "Failed to fetch categories" },
       { status: 500 }
@@ -29,53 +25,46 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
+    const cookieStore = await cookies();
+    const token = cookieStore.get("token")?.value;
 
-    if (!session || session.role !== "ADMIN") {
-      return NextResponse.json(
-        { message: "Unauthorized: Admin access required" },
-        { status: 403 }
-      );
+    if (!token) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    const secret = new TextEncoder().encode(
+      process.env.JWT_SECRET || "fallback_secret_key_change_me"
+    );
+    const { payload } = await jwtVerify(token, secret);
+
+    const userId = payload.userId as string;
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!dbUser || dbUser.role !== "ADMIN") {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
-    const validation = categorySchema.safeParse(body);
+    const { name, slug } = body;
 
-    if (!validation.success) {
+    if (!name || !slug) {
       return NextResponse.json(
-        { message: "Validation error", errors: validation.error.flatten().fieldErrors },
+        { message: "Name and slug are required" },
         { status: 400 }
       );
     }
 
-    const { name, description, imageUrl } = validation.data;
-    const slug = slugify(name);
-
-    const existingCategory = await prisma.category.findUnique({
-      where: { slug },
+    const newCategory = await prisma.category.create({
+      data: { name, slug },
     });
 
-    if (existingCategory) {
-      return NextResponse.json(
-        { message: "Category with this name already exists" },
-        { status: 409 }
-      );
-    }
-
-    const category = await prisma.category.create({
-      data: {
-        name,
-        slug,
-        description: description || null,
-        imageUrl: imageUrl || null,
-      },
-    });
-
-    return NextResponse.json(category, { status: 201 });
-  } catch (error) {
-    console.error("POST Category Error:", error);
+    return NextResponse.json(newCategory, { status: 201 });
+  } catch (error: any) {
+    console.error("Failed to create category:", error);
     return NextResponse.json(
-      { message: "Failed to create category" },
+      { message: error.message || "Failed to create category" },
       { status: 500 }
     );
   }
