@@ -1,21 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { verifyPassword, signToken, setSessionCookie } from "@/lib/auth";
-import { loginSchema } from "@/lib/validations";
+import bcrypt from "bcryptjs";
+import { SignJWT } from "jose";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const validation = loginSchema.safeParse(body);
+    const { email, password } = await request.json();
 
-    if (!validation.success) {
+    if (!email || !password) {
       return NextResponse.json(
-        { message: "Validation error", errors: validation.error.flatten().fieldErrors },
+        { message: "Email and password are required" },
         { status: 400 }
       );
     }
-
-    const { email, password } = validation.data;
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -28,40 +25,53 @@ export async function POST(request: Request) {
       );
     }
 
-    const isValidPassword = await verifyPassword(password, user.password);
-
-    if (!isValidPassword) {
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
       return NextResponse.json(
         { message: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    const token = await signToken({
-      id: user.id,
+    const secret = new TextEncoder().encode(
+      process.env.JWT_SECRET || "fallback_secret_key_change_me"
+    );
+    const token = await new SignJWT({
+      userId: user.id,
       email: user.email,
-      name: user.name,
       role: user.role,
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime("24h")
+      .sign(secret);
+
+    const response = NextResponse.json({
+      message: "Login successful",
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
     });
 
-    await setSessionCookie(token);
+    response.cookies.set({
+      name: "token",
+      value: token,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 86400,
+    });
 
+    return response;
+  } catch (error: any) {
+    console.error("Login error:", error);
     return NextResponse.json(
-      {
-        message: "Login successful",
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      },
-      { status: 200 }
-    );
-  } catch (error) {
-    console.error("Login Error:", error);
-    return NextResponse.json(
-      { message: "Internal server error during login" },
+      { message: error.message || "Internal server error" },
       { status: 500 }
     );
   }
