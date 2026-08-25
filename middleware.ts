@@ -2,63 +2,44 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret-key-change-in-production-min-32-chars";
-const encodedKey = new TextEncoder().encode(JWT_SECRET);
-const COOKIE_NAME = "harvest_session";
-
-interface JWTPayload {
-  id: string;
-  email: string;
-  role: "ADMIN" | "CUSTOMER";
-}
-
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get(COOKIE_NAME)?.value;
 
-  let session: JWTPayload | null = null;
+  const isAdminRoute =
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/");
 
-  if (token) {
+  if (isAdminRoute) {
+    const token = request.cookies.get("token")?.value;
+
+    if (!token) {
+      const loginUrl = new URL("/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+
     try {
-      const { payload } = await jwtVerify(token, encodedKey);
-      session = payload as unknown as JWTPayload;
-    } catch (error) {
-      session = null;
-    }
-  }
+      const secret = new TextEncoder().encode(
+        process.env.JWT_SECRET || "fallback_secret_key_change_me"
+      );
+      const { payload } = await jwtVerify(token, secret);
+      const role = payload.role as string;
 
-  // Protected Admin Routes
-  if (pathname.startsWith("/admin")) {
-    if (!session) {
+      if (role !== "ADMIN") {
+        const accountUrl = new URL("/account", request.url);
+        return NextResponse.redirect(accountUrl);
+      }
+    } catch (err) {
       const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
     }
-    if (session.role !== "ADMIN") {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
-  }
-
-  // Protected Customer / User Account & Checkout Routes
-  if (pathname.startsWith("/account") || pathname.startsWith("/checkout")) {
-    if (!session) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("callbackUrl", pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-  }
-
-  // Prevent logged in users from visiting /login or /register
-  if ((pathname === "/login" || pathname === "/register") && session) {
-    if (session.role === "ADMIN") {
-      return NextResponse.redirect(new URL("/admin/dashboard", request.url));
-    }
-    return NextResponse.redirect(new URL("/", request.url));
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/account/:path*", "/checkout", "/login", "/register"],
+  matcher: [
+    "/admin",
+    "/admin/:path*",
+  ],
 };
