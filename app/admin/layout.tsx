@@ -6,9 +6,13 @@ import { AdminSidebar } from "@/components/AdminSidebar";
 
 function getJwtSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
+
   if (!secret) {
-    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
+    throw new Error(
+      "CRITICAL ERROR: JWT_SECRET environment variable is missing."
+    );
   }
+
   return new TextEncoder().encode(secret);
 }
 
@@ -24,21 +28,27 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
+  let payload;
+
   try {
     const secret = getJwtSecret();
-    const { payload } = await jwtVerify(token, secret);
-    
-    if (payload.role !== "ADMIN") {
-      redirect("/account");
-    }
-  } catch (error) {
+    const result = await jwtVerify(token, secret);
+    payload = result.payload;
+  } catch {
     redirect("/login");
+  }
+
+  if (payload.role !== "ADMIN") {
+    redirect("/account");
   }
 
   return (
     <div className="flex min-h-screen bg-gray-100">
       <AdminSidebar />
-      <main className="flex-1 p-8 overflow-y-auto">{children}</main>
+
+      <main className="flex-1 p-8 overflow-y-auto">
+        {children}
+      </main>
     </div>
   );
 }
