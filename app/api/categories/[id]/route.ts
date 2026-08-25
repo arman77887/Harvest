@@ -1,91 +1,50 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth";
-import { categorySchema } from "@/lib/validations";
-import { slugify } from "@/lib/utils";
-
-export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const session = await getSession();
-
-    if (!session || session.role !== "ADMIN") {
-      return NextResponse.json(
-        { message: "Unauthorized: Admin access required" },
-        { status: 403 }
-      );
-    }
-
-    const body = await request.json();
-    const validation = categorySchema.partial().safeParse(body);
-
-    if (!validation.success) {
-      return NextResponse.json(
-        { message: "Validation error", errors: validation.error.flatten().fieldErrors },
-        { status: 400 }
-      );
-    }
-
-    const updateData: any = { ...validation.data };
-
-    if (updateData.name) {
-      updateData.slug = slugify(updateData.name);
-    }
-
-    const updatedCategory = await prisma.category.update({
-      where: { id: params.id },
-      data: updateData,
-    });
-
-    return NextResponse.json(updatedCategory, { status: 200 });
-  } catch (error) {
-    console.error("PATCH Category Error:", error);
-    return NextResponse.json(
-      { message: "Failed to update category" },
-      { status: 500 }
-    );
-  }
-}
+import { cookies } from "next/headers";
+import { jwtVerify } from "jose";
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSession();
+    const cookieStore = await cookies();
+    const token = cookieStore.get("token")?.value;
 
-    if (!session || session.role !== "ADMIN") {
-      return NextResponse.json(
-        { message: "Unauthorized: Admin access required" },
-        { status: 403 }
-      );
+    if (!token) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const productCount = await prisma.product.count({
-      where: { categoryId: params.id },
+    const secret = new TextEncoder().encode(
+      process.env.JWT_SECRET || "fallback_secret_key_change_me"
+    );
+    const { payload } = await jwtVerify(token, secret);
+
+    const userId = payload.userId as string;
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
     });
 
-    if (productCount > 0) {
-      return NextResponse.json(
-        { message: `Cannot delete category: ${productCount} products are linked to it.` },
-        { status: 400 }
-      );
+    if (!dbUser || dbUser.role !== "ADMIN") {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
+
+    const { id } = await params;
+
+    const existing = await prisma.category.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ message: "Category not found" }, { status: 404 });
     }
 
     await prisma.category.delete({
-      where: { id: params.id },
+      where: { id },
     });
 
+    return NextResponse.json({ message: "Category deleted successfully" });
+  } catch (error: any) {
+    console.error("Failed to delete category:", error);
     return NextResponse.json(
-      { message: "Category deleted successfully" },
-      { status: 200 }
-    );
-  } catch (error) {
-    console.error("DELETE Category Error:", error);
-    return NextResponse.json(
-      { message: "Failed to delete category" },
+      { message: error.message || "Failed to delete category" },
       { status: 500 }
     );
   }
