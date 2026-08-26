@@ -61,9 +61,17 @@ export default function AccountPage() {
     fetchUserData();
   }, [router]);
 
-  const handleLogout = () => {
-    document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    router.push("/login");
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
   };
 
   if (loading) {

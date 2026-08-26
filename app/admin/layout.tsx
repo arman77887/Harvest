@@ -1,44 +1,20 @@
 import React from "react";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { jwtVerify } from "jose";
+import { getSession } from "@/lib/auth";
 import { AdminSidebar } from "@/components/AdminSidebar";
-
-function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-
-  if (!secret) {
-    throw new Error(
-      "CRITICAL ERROR: JWT_SECRET environment variable is missing."
-    );
-  }
-
-  return new TextEncoder().encode(secret);
-}
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value;
+  const session = await getSession();
 
-  if (!token) {
+  if (!session) {
     redirect("/login");
   }
 
-  let payload;
-
-  try {
-    const secret = getJwtSecret();
-    const result = await jwtVerify(token, secret);
-    payload = result.payload;
-  } catch {
-    redirect("/login");
-  }
-
-  if (payload.role !== "ADMIN") {
+  if (session.role !== "ADMIN") {
     redirect("/account");
   }
 

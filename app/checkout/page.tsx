@@ -4,8 +4,9 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
 import { formatCurrency } from "@/lib/utils";
-import { ShieldCheck, Loader2, ArrowLeft } from "lucide-react";
+import { ShieldCheck, Loader2, ArrowLeft, Copy, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { PAYMENT_METHODS } from "@/lib/payment-methods";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -19,7 +20,9 @@ export default function CheckoutPage() {
     shippingAddress: "",
     city: "",
     phone: "",
-    paymentMethod: "COD",
+    paymentMethod: "BKASH",
+    paymentNumber: "",
+    transactionId: "",
   });
 
   const subtotal = getCartTotal();
@@ -51,8 +54,17 @@ export default function CheckoutPage() {
     setError("");
 
     try {
+      const selectedPayment =
+        formData.paymentMethod === "BKASH" ||
+        formData.paymentMethod === "NAGAD" ||
+        formData.paymentMethod === "ROCKET"
+          ? PAYMENT_METHODS[formData.paymentMethod]
+          : null;
+
       const payload = {
         ...formData,
+        paymentNumber: selectedPayment?.number || "",
+        transactionId: formData.transactionId.trim(),
         items: cart.map((item) => ({
           productId: item.id,
           quantity: item.quantity,
@@ -60,6 +72,15 @@ export default function CheckoutPage() {
         })),
         totalAmount: total,
       };
+
+      if (
+        formData.paymentMethod !== "COD" &&
+        (!formData.paymentNumber || !formData.transactionId)
+      ) {
+        throw new Error(
+          "Please provide the payment number and transaction ID."
+        );
+      }
 
       const res = await fetch("/api/orders", {
         method: "POST",
@@ -186,31 +207,115 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+          <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-5">
             <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-3">
               Payment Method
             </h2>
 
-            <div className="space-y-3">
-              <label className="flex items-center space-x-3 p-3.5 border border-harvest-200 bg-harvest-50/50 rounded-lg cursor-pointer">
-                <input
-                  type="radio"
-                  name="paymentMethod"
-                  value="COD"
-                  checked={formData.paymentMethod === "COD"}
-                  onChange={handleChange}
-                  className="text-harvest-600 focus:ring-harvest-500"
-                />
-                <div>
-                  <span className="text-sm font-semibold text-gray-900 block">
-                    Cash on Delivery (COD)
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                ["COD", "Cash on Delivery"],
+                ["BKASH", "bKash"],
+                ["NAGAD", "Nagad"],
+                ["ROCKET", "Rocket"],
+              ].map(([value, label]) => (
+                <label
+                  key={value}
+                  className={`flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition ${
+                    formData.paymentMethod === value
+                      ? "border-harvest-500 bg-harvest-50"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value={value}
+                    checked={formData.paymentMethod === value}
+                    onChange={handleChange}
+                    className="text-harvest-600 focus:ring-harvest-500"
+                  />
+
+                  <span className="text-sm font-semibold text-gray-900">
+                    {label}
                   </span>
-                  <span className="text-xs text-gray-500">
-                    Pay with cash when your fresh produce arrives at your door.
-                  </span>
-                </div>
-              </label>
+                </label>
+              ))}
             </div>
+
+            {formData.paymentMethod !== "COD" && (
+              <div className="space-y-4 bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <div>
+                  <h3 className="font-bold text-gray-900">
+                    Send Payment
+                  </h3>
+
+                  <p className="text-xs text-gray-500 mt-1">
+                    Send the exact order amount to the number below.
+                  </p>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <p className="text-xs text-gray-500">
+                    Payment Number
+                  </p>
+
+                  <p className="text-lg font-bold text-gray-900 mt-1">
+                    {formData.paymentMethod === "BKASH" &&
+                      "01XXXXXXXXX"}
+
+                    {formData.paymentMethod === "NAGAD" &&
+                      "01XXXXXXXXX"}
+
+                    {formData.paymentMethod === "ROCKET" &&
+                      "01XXXXXXXXX"}
+                  </p>
+
+                  <p className="text-xs text-gray-500 mt-1">
+                    Method: {formData.paymentMethod}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Your Payment Number *
+                  </label>
+
+                  <input
+                    type="tel"
+                    name="paymentNumber"
+                    required
+                    value={formData.paymentNumber}
+                    onChange={handleChange}
+                    placeholder="01XXXXXXXXX"
+                    className="w-full px-3.5 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-harvest-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Transaction ID *
+                  </label>
+
+                  <input
+                    type="text"
+                    name="transactionId"
+                    required
+                    value={formData.transactionId}
+                    onChange={handleChange}
+                    placeholder="Enter transaction ID"
+                    className="w-full px-3.5 py-2 border border-gray-200 rounded-lg text-sm uppercase focus:outline-none focus:ring-2 focus:ring-harvest-500"
+                  />
+                </div>
+
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+                  After sending payment, enter your payment number and
+                  transaction ID above. Your payment will remain
+                  <strong> PENDING </strong>
+                  until an admin verifies it.
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

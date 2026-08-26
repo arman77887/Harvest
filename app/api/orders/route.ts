@@ -95,7 +95,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { shippingAddress, phone, paymentMethod, items } = validation.data;
+    const {
+      shippingAddress,
+      phone,
+      paymentMethod,
+      paymentNumber,
+      transactionId,
+      items,
+    } = validation.data;
 
     // Atomic Transaction for Stock Verification & Order Creation
     const order = await prisma.$transaction(async (tx) => {
@@ -147,6 +154,9 @@ export async function POST(request: Request) {
           shippingAddress,
           phone,
           paymentMethod,
+          paymentNumber: paymentNumber || null,
+          transactionId: transactionId || null,
+          paymentStatus: paymentMethod === "COD" ? "PENDING" : "PENDING",
           status: "PENDING",
           orderItems: {
             create: orderItemsToCreate,

@@ -1,25 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { jwtVerify } from "jose";
-
-function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
-  }
-  return new TextEncoder().encode(secret);
-}
+import { getSession } from "@/lib/auth";
 
 export async function GET() {
   try {
     const products = await prisma.product.findMany({
-      include: { category: true },
-      orderBy: { createdAt: "desc" },
+      include: {
+        category: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
     });
+
     return NextResponse.json(products);
   } catch (error) {
     console.error("Failed to fetch products:", error);
+
     return NextResponse.json(
       { message: "Failed to fetch products" },
       { status: 500 }
@@ -29,31 +26,76 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
+    const session = await getSession();
 
-    if (!token) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session) {
+      return NextResponse.json(
+        { message: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const secret = getJwtSecret();
-    const { payload } = await jwtVerify(token, secret);
-
-    const userId = payload.userId as string;
-    const dbUser = await prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!dbUser || dbUser.role !== "ADMIN") {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    if (session.role !== "ADMIN") {
+      return NextResponse.json(
+        { message: "Forbidden" },
+        { status: 403 }
+      );
     }
 
     const body = await request.json();
-    const { name, slug, description, price, stock, imageUrl, categoryId } = body;
 
-    if (!name || !slug || price === undefined || stock === undefined || !imageUrl || !categoryId) {
+    const name =
+      typeof body.name === "string" ? body.name.trim() : "";
+
+    const slug =
+      typeof body.slug === "string" ? body.slug.trim() : "";
+
+    const description =
+      typeof body.description === "string"
+        ? body.description.trim()
+        : "";
+
+    const imageUrl =
+      typeof body.imageUrl === "string"
+        ? body.imageUrl.trim()
+        : "";
+
+    const categoryId =
+      typeof body.categoryId === "string"
+        ? body.categoryId
+        : "";
+
+    const price = Number(body.price);
+    const stock = Number(body.stock);
+
+    if (
+      !name ||
+      !slug ||
+      !imageUrl ||
+      !categoryId ||
+      !Number.isFinite(price) ||
+      !Number.isFinite(stock)
+    ) {
       return NextResponse.json(
-        { message: "Missing required fields" },
+        { message: "Missing or invalid required fields" },
+        { status: 400 }
+      );
+    }
+
+    if (price < 0 || stock < 0 || !Number.isInteger(stock)) {
+      return NextResponse.json(
+        { message: "Invalid price or stock value" },
+        { status: 400 }
+      );
+    }
+
+    const category = await prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+
+    if (!category) {
+      return NextResponse.json(
+        { message: "Category not found" },
         { status: 400 }
       );
     }
@@ -62,19 +104,23 @@ export async function POST(request: Request) {
       data: {
         name,
         slug,
-        description: description || "",
-        price: parseFloat(price),
-        stock: parseInt(stock, 10),
+        description,
+        price,
+        stock,
         imageUrl,
         categoryId,
+      },
+      include: {
+        category: true,
       },
     });
 
     return NextResponse.json(newProduct, { status: 201 });
   } catch (error: any) {
     console.error("Failed to create product:", error);
+
     return NextResponse.json(
-      { message: error.message || "Failed to create product" },
+      { message: error?.message || "Failed to create product" },
       { status: 500 }
     );
   }

@@ -1,57 +1,67 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { jwtVerify } from "jose";
-
-const VALID_STATUSES = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
-
-function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("CRITICAL ERROR: JWT_SECRET environment variable is missing.");
-  }
-  return new TextEncoder().encode(secret);
-}
+import { getSession } from "@/lib/auth";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
+    const session = await getSession();
 
-    if (!token) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session) {
+      return NextResponse.json(
+        { message: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const secret = getJwtSecret();
-    const { payload } = await jwtVerify(token, secret);
-    const userId = payload.userId as string;
-    const userRole = payload.role as string;
-
     const { id } = await params;
+
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
-        items: {
-          include: { product: true },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
         },
-        user: true,
+        orderItems: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                imageUrl: true,
+              },
+            },
+          },
+        },
       },
     });
 
     if (!order) {
-      return NextResponse.json({ message: "Order not found" }, { status: 404 });
+      return NextResponse.json(
+        { message: "Order not found" },
+        { status: 404 }
+      );
     }
 
-    if (userRole !== "ADMIN" && order.userId !== userId) {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    // Customers can only see their own orders.
+    // Admins can see any order.
+    if (session.role !== "ADMIN" && order.userId !== session.id) {
+      return NextResponse.json(
+        { message: "Forbidden" },
+        { status: 403 }
+      );
     }
 
     return NextResponse.json(order);
   } catch (error) {
-    console.error("Failed to fetch order:", error);
+    console.error("GET Order Error:", error);
+
     return NextResponse.json(
       { message: "Failed to fetch order" },
       { status: 500 }
@@ -64,32 +74,63 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
+    const session = await getSession();
 
-    if (!token) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session) {
+      return NextResponse.json(
+        { message: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const secret = getJwtSecret();
-    const { payload } = await jwtVerify(token, secret);
-    const userId = payload.userId as string;
-
-    const dbUser = await prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!dbUser || dbUser.role !== "ADMIN") {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    // Only admins can update order status.
+    if (session.role !== "ADMIN") {
+      return NextResponse.json(
+        { message: "Forbidden" },
+        { status: 403 }
+      );
     }
 
     const { id } = await params;
     const body = await request.json();
-    const { status } = body;
 
-    if (!status || !VALID_STATUSES.includes(status)) {
+    const status = body.status;
+    const paymentStatus = body.paymentStatus;
+
+    const allowedStatuses = [
+      "PENDING",
+      "PROCESSING",
+      "SHIPPED",
+      "DELIVERED",
+      "CANCELLED",
+    ];
+
+    const allowedPaymentStatuses = [
+      "PENDING",
+      "VERIFIED",
+      "REJECTED",
+    ];
+
+    if (status !== undefined && !allowedStatuses.includes(status)) {
       return NextResponse.json(
-        { message: "Invalid or missing status value" },
+        { message: "Invalid order status" },
+        { status: 400 }
+      );
+    }
+
+    if (
+      paymentStatus !== undefined &&
+      !allowedPaymentStatuses.includes(paymentStatus)
+    ) {
+      return NextResponse.json(
+        { message: "Invalid payment status" },
+        { status: 400 }
+      );
+    }
+
+    if (status === undefined && paymentStatus === undefined) {
+      return NextResponse.json(
+        { message: "No update data provided" },
         { status: 400 }
       );
     }
@@ -99,24 +140,46 @@ export async function PATCH(
     });
 
     if (!existingOrder) {
-      return NextResponse.json({ message: "Order not found" }, { status: 404 });
+      return NextResponse.json(
+        { message: "Order not found" },
+        { status: 404 }
+      );
     }
 
     const updatedOrder = await prisma.order.update({
       where: { id },
-      data: { status },
+      data: {
+        ...(status !== undefined ? { status } : {}),
+        ...(paymentStatus !== undefined ? { paymentStatus } : {}),
+      },
       include: {
-        items: {
-          include: { product: true },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        orderItems: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                imageUrl: true,
+              },
+            },
+          },
         },
       },
     });
 
     return NextResponse.json(updatedOrder);
-  } catch (error: any) {
-    console.error("Failed to update order status:", error);
+  } catch (error) {
+    console.error("PATCH Order Error:", error);
+
     return NextResponse.json(
-      { message: error.message || "Failed to update order status" },
+      { message: "Failed to update order" },
       { status: 500 }
     );
   }
